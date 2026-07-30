@@ -41,11 +41,26 @@ Parts ruled out, and why:
 - **ESP32-WROOM:** has BLE, but **no native USB device** (USB via a serial
   chip, CP2102/CH340). Doesn't become a clean USB keyboard. Out for this
   approach.
-- **ESP32-C3:** has BLE, but USB is Serial/JTAG, not a comfortable full HID.
-  Plan B if needed.
+- **ESP32-C3:** has BLE, but its only USB peripheral is a fixed-function
+  USB-Serial/JTAG controller — there's no USB-OTG device controller, so it
+  cannot become a TinyUSB HID keyboard at all. This is a hardware limit,
+  not a software/driver gap (see note below — revisited and rejected as a
+  cheaper/smaller alternative for exactly this reason).
 - **NodeMCU / ESP-01 (ESP8266):** no Bluetooth. Out.
 - **JY-MCU BT_Board (HC-05/06):** Bluetooth Classic SPP, no BLE and no HID
   host. Out.
+
+> **ESP32-C3 revisited, and rejected again.** The C3 came up again as a
+> smaller/cheaper board for a possible second unit. Since it can't do native
+> USB HID (see above), the two real alternatives are: (a) have the C3 act as
+> a **BLE HID keyboard peripheral** itself (dual BLE role: central to the
+> remote, peripheral to the PC) — technically works via NimBLE, but
+> reintroduces exactly the BLE-host pairing/reconnect fragility this project
+> deliberately avoided by choosing S3+USB in the first place (see the "Output"
+> bullet below); or (b) USB-CDC + a small PC-side helper app translating
+> serial messages into keystrokes — wired and reliable, but no longer
+> plug-and-play (needs a resident program on the PC). Neither beats the
+> S3's native-USB-HID simplicity, so the project stays S3-only.
 
 ### The remote: DQX-Q7
 - Waterproof Bluetooth handlebar/steering-wheel media remote, **5 buttons**.
