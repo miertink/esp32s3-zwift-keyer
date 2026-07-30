@@ -14,35 +14,88 @@
 
 USBHIDKeyboard keyboard;
 
-static NimBLEAdvertisedDevice *remoteDevice = nullptr;
-static bool connected = false;
+static NimBLEAddress targetAddress("");
+static NimBLEClient *client = nullptr;
+static volatile bool deviceFound = false;
+static volatile bool connected = false;
 
 // TODO (Phase 1): report parser + single/double-tap state machine
-// (see project.md sections 3.3-3.5 and 5). For now just logs the raw report.
+// (see project.md sections 3.3-3.5 and 5). For now this just logs every
+// notification, including which characteristic it came from, so we can
+// identify which one the DQX-Q7 actually reports buttons on (see the
+// discovery risk in project.md section 7.2).
 static void onNotify(NimBLERemoteCharacteristic *characteristic,
                       uint8_t *data, size_t length, bool isNotify) {
-  if (length < 1) return;
-  Serial.printf("[BLE] report: %02X %02X\n", data[0],
-                length > 1 ? data[1] : 0);
+  Serial.printf("[BLE] notify %s:",
+                characteristic->getUUID().toString().c_str());
+  for (size_t i = 0; i < length; i++) Serial.printf(" %02X", data[i]);
+  Serial.println();
 }
+
+class ClientCallbacks : public NimBLEClientCallbacks {
+  void onConnect(NimBLEClient *pClient) override {
+    Serial.println("[BLE] connected, securing link...");
+    pClient->secureConnection();
+  }
+  void onDisconnect(NimBLEClient *pClient) override {
+    Serial.println("[BLE] disconnected, rescanning...");
+    connected = false;
+    deviceFound = false;
+    NimBLEDevice::getScan()->start(0, false);
+  }
+};
 
 class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
   void onResult(NimBLEAdvertisedDevice *device) override {
     if (device->getAddress().toString() == REMOTE_BLE_ADDRESS) {
       Serial.println("[BLE] DQX-Q7 found, stopping scan...");
+      targetAddress = device->getAddress();
+      deviceFound = true;
       NimBLEDevice::getScan()->stop();
     }
   }
 };
 
+// Subscribes to every notify/indicate characteristic on every service.
+// TODO (Phase 1): once the real report characteristic is known from the
+// logs above, subscribe only to that one instead of everything.
+static void subscribeToAll() {
+  auto *services = client->getServices(true);
+  for (auto *service : *services) {
+    auto *characteristics = service->getCharacteristics(true);
+    for (auto *characteristic : *characteristics) {
+      if (characteristic->canNotify() || characteristic->canIndicate()) {
+        Serial.printf("[BLE] subscribing to %s (service %s)\n",
+                      characteristic->getUUID().toString().c_str(),
+                      service->getUUID().toString().c_str());
+        characteristic->subscribe(true, onNotify);
+      }
+    }
+  }
+}
+
 static void connectToRemote() {
-  // TODO (Phase 1): connect, pair/bond (persist in NVS), discover the
-  // report service/characteristic, and subscribe to notifications.
-  // See project.md section 7.2 about accessing HID 0x1812 as a central.
+  Serial.println("[BLE] connecting...");
+  if (client == nullptr) {
+    client = NimBLEDevice::createClient();
+    client->setClientCallbacks(new ClientCallbacks(), false);
+  }
+
+  if (!client->connect(targetAddress)) {
+    Serial.println("[BLE] connect failed, will retry");
+    deviceFound = false;
+    NimBLEDevice::getScan()->start(0, false);
+    return;
+  }
+
+  subscribeToAll();
+  connected = true;
+  Serial.println("[BLE] ready");
 }
 
 void setup() {
   Serial.begin(115200);
+  delay(200);
   Serial.println("\n[BOOT] BLE->USB HID bridge (Zwift Navigation Remote)");
 
   // --- USB HID keyboard (TinyUSB) ---
@@ -51,6 +104,11 @@ void setup() {
 
   // --- BLE central (NimBLE) ---
   NimBLEDevice::init("");
+  // Bonding so we don't have to re-pair after every reconnect (the bond
+  // key is persisted in NVS by the NimBLE stack).
+  NimBLEDevice::setSecurityAuth(/*bonding=*/true, /*mitm=*/false,
+                                 /*sc=*/true);
+
   NimBLEScan *scan = NimBLEDevice::getScan();
   scan->setAdvertisedDeviceCallbacks(new ScanCallbacks());
   scan->setActiveScan(true);
@@ -61,9 +119,8 @@ void setup() {
 }
 
 void loop() {
-  if (!connected) {
-    // TODO (Phase 1): aggressive (re)connection logic after the remote
-    // sleeps (see project.md section 7.3).
+  if (deviceFound && !connected) {
+    connectToRemote();
   }
   delay(10);
 }
