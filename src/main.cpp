@@ -19,17 +19,59 @@ static NimBLEClient *client = nullptr;
 static volatile bool deviceFound = false;
 static volatile bool connected = false;
 
-// TODO (Phase 1): report parser + single/double-tap state machine
-// (see project.md sections 3.3-3.5 and 5). For now this just logs every
-// notification, including which characteristic it came from, so we can
-// identify which one the DQX-Q7 actually reports buttons on (see the
-// discovery risk in project.md section 7.2).
+// TODO (Phase 1): load this map from /config.json (ArduinoJson) instead of
+// hardcoding it -- this mirrors the default map in project.md section 5.
+// Play/Pause is the only button with a double-tap action; the window is
+// paid only by it, so the four direction buttons stay instant.
+static bool playPausePending = false;
+static uint32_t playPausePendingSince = 0;
+
+static void handleButtonPress(uint8_t mask) {
+  switch (mask) {
+    case ButtonMask::BACK:
+      keyboard.write(KEY_LEFT_ARROW);
+      break;
+    case ButtonMask::FORWARD:
+      keyboard.write(KEY_RIGHT_ARROW);
+      break;
+    case ButtonMask::VOL_UP:
+      keyboard.write(KEY_UP_ARROW);
+      break;
+    case ButtonMask::VOL_DOWN:
+      keyboard.write(KEY_DOWN_ARROW);
+      break;
+    case ButtonMask::PLAY_PAUSE: {
+      uint32_t now = millis();
+      if (playPausePending &&
+          (now - playPausePendingSince) <= DEFAULT_DOUBLE_TAP_WINDOW_MS) {
+        // Second tap inside the window -> double-tap action.
+        playPausePending = false;
+        keyboard.write(KEY_ESC);
+      } else {
+        // First tap -> wait out the window in loop() for a possible second.
+        playPausePending = true;
+        playPausePendingSince = now;
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+// The DQX-Q7 report is a Consumer usage, 2 bytes, bitmap in byte 0: a tap
+// arrives as "<mask> 00" immediately followed by a "00 00" release (see
+// project.md 3.3-3.4), so only the non-zero byte-0 frame is a button press.
 static void onNotify(NimBLERemoteCharacteristic *characteristic,
                       uint8_t *data, size_t length, bool isNotify) {
   Serial.printf("[BLE] notify %s:",
                 characteristic->getUUID().toString().c_str());
   for (size_t i = 0; i < length; i++) Serial.printf(" %02X", data[i]);
   Serial.println();
+
+  if (length == 2 && data[0] != 0) {
+    handleButtonPress(data[0]);
+  }
 }
 
 class ClientCallbacks : public NimBLEClientCallbacks {
@@ -114,13 +156,19 @@ void setup() {
   scan->setActiveScan(true);
   scan->start(0, false);
 
-  // TODO (Phase 1): LittleFS + /config.json parser (ArduinoJson).
-  // TODO (Phase 1): name->HID keycode map.
+  // TODO (Phase 1): LittleFS + /config.json parser (ArduinoJson), to
+  // replace the hardcoded map in handleButtonPress().
 }
 
 void loop() {
   if (deviceFound && !connected) {
     connectToRemote();
+  }
+  if (playPausePending &&
+      (millis() - playPausePendingSince) > DEFAULT_DOUBLE_TAP_WINDOW_MS) {
+    // Window elapsed with no second tap -> single-tap action.
+    playPausePending = false;
+    keyboard.write(KEY_RETURN);
   }
   delay(10);
 }
