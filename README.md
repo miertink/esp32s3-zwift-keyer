@@ -5,8 +5,7 @@ as a USB HID keyboard, to navigate the Zwift interface (arrows / Enter /
 Esc).
 
 Full specification (hardware, BLE protocol, key map, roadmap, and known
-risks): see [project.md](project.md) (written in Portuguese, the original
-project notes).
+risks): see [project.md](project.md).
 
 ## Environment
 
