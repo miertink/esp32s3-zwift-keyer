@@ -144,17 +144,17 @@ Size:       2 bytes (bitmap)
 │  (5 buttons) │  Consumer 0x0C 2B    │  (the bridge)│  arrows/enter/esc    │  Zwift   │
 └──────────────┘                      └──────────────┘                      └──────────┘
         │                                    │
-        │                              reads JSON config
-        │                              (LittleFS)
+        │                              fixed button->key map
+        │                              (compiled into config.h)
         └── standard HID 0x1812              │
-            (visible on Windows,             └── GPIO jumper -> web config mode (Phase 2)
+            (visible on Windows,
              hidden on iOS)
 ```
 
 - **Input:** ESP32-S3 as **BLE central**, subscribes to the remote's HID
   notifications, reads the 2-byte report, applies the bitmask.
-- **Processing:** looks up the map (JSON on LittleFS), decides the key,
-  applies single/double-tap logic.
+- **Processing:** looks up the fixed map (`include/config.h`), decides the
+  key, applies single/double-tap logic.
 - **Output:** **USB HID keyboard** (TinyUSB) — the PC sees a plain keyboard
   plugged in. Wired USB output = 100% supported by Zwift on PC (avoids BLE
   keyboard host limitations).
@@ -164,7 +164,7 @@ Size:       2 bytes (bitmap)
 - **TinyUSB** (USB HID keyboard side)
 - **NimBLE-Arduino** (BLE central side) — lightweight, coexists well with
   TinyUSB
-- Storage: **LittleFS** (config JSON), **NVS** (BLE bond keys)
+- Storage: **NVS** (BLE bond keys) only — no filesystem, no runtime config.
 
 > Note: no ESP-IDF 4.4 constraint like the one in the ZX-Wespi project. Here
 > the new stack (Arduino-ESP32 3.x) is used freely — it's where S3 + USB HID +
@@ -172,10 +172,13 @@ Size:       2 bytes (bitmap)
 
 ---
 
-## 5. Key map (initial config)
+## 5. Key map (fixed, compiled into firmware)
 
 Philosophy: **Apple Remote-style navigation**. 4 instant direction buttons +
 Enter (single) / Esc (double) on Play/Pause.
+
+There is no runtime or web config: the map below is `kButtonMap` in
+`include/config.h`, and changing it means editing that file and reflashing.
 
 | Button       | Mask    | Single (instant)     | Double            |
 |--------------|:-------:|-----------------------|-------------------|
@@ -188,82 +191,48 @@ Enter (single) / Esc (double) on Play/Pause.
 - **4 directions = instant** (no double-tap → no window latency → fluid
   navigation like the Apple Remote).
 - **Only Play/Pause has double-tap** → it's the only one that pays the window
-  latency (~300ms), which is imperceptible for Enter/Esc in a menu.
-- Double-taps on the other buttons are left free for future expansion via
-  JSON.
-
-### Config file format (`/config.json` on LittleFS)
-
-```json
-{
-  "double_tap_window_ms": 300,
-  "buttons": {
-    "back":       { "mask": "0x08", "single": "LEFT" },
-    "forward":    { "mask": "0x04", "single": "RIGHT" },
-    "vol_up":     { "mask": "0x01", "single": "UP" },
-    "vol_down":   { "mask": "0x02", "single": "DOWN" },
-    "play_pause": { "mask": "0x10", "single": "RETURN", "double": "ESCAPE" }
-  }
-}
-```
-
-Parser rules:
-- Button **without** a `"double"` field → **instant** mode (fires `single`
-  right on press, doesn't wait for the window).
-- Button **with** a `"double"` field → waits `double_tap_window_ms`; 1 tap =
-  `single`, 2 taps = `double`.
-- Key names → map to HID keycodes (USB HID Usage Page 0x07 table). Support at
-  least: `LEFT RIGHT UP DOWN RETURN ESCAPE SPACE TAB`, letters `A–Z`, digits
-  `0–9`, `F1–F12`, `PAGEUP PAGEDOWN`.
+  latency (`DOUBLE_TAP_WINDOW_MS`, 300ms by default), which is imperceptible
+  for Enter/Esc in a menu.
+- Double-taps on the other buttons are left as `0` (no double-tap action) in
+  `kButtonMap`, free for future expansion by editing `config.h`.
+- A button entry is `{mask, singleKey, doubleKey}`; `doubleKey == 0` means
+  instant mode (fires `singleKey` immediately on press, no window wait).
 
 ---
 
 ## 6. Implementation roadmap
 
-### Phase 1 — Functional core (NO Wi-Fi)
-Goal: prove out BLE central + USB HID + remapping, file-based config.
+Goal: BLE central + USB HID + a fixed button->key map, no Wi-Fi, no runtime
+config.
 
-- [ ] Bring-up: initialize TinyUSB (HID keyboard) **and** NimBLE central
+- [x] Bring-up: initialize TinyUSB (HID keyboard) **and** NimBLE central
       together, in the correct order (a point of attention — see §7).
-- [ ] USB HID keyboard: standard keyboard descriptor; `sendKey(keycode)`
-      function with press+release.
-- [ ] BLE central: scan → connect to the DQX-Q7 (`98:4a:c0:ce:bf:a2`).
-- [ ] Bond/pairing: pair and **persist the key in NVS** to reconnect without
-      re-pairing.
-- [ ] Discover the HID service / report characteristic; **subscribe to
-      notifications**. (If HID `0x1812` isn't accessible as a central,
-      investigate reading via the boot protocol, or the report WebHID saw —
-      Consumer 0x0C, 2 bytes.)
-- [ ] Report parser: read 2 bytes, apply masks `0x01`–`0x10`, detect the
-      "pressed" transition (bit goes up) and "released" (`00 00`).
-- [ ] Config: LittleFS + JSON parser (`ArduinoJson`) for `/config.json`.
-- [ ] Per-button state machine:
-      - **instant** mode → fires on press.
-      - **double** mode → window timer; 1 vs 2 taps.
-      - filter volume **auto-repeat** (the ~4Hz burst shouldn't turn into N
-        taps).
-- [ ] Name→HID keycode map.
+- [x] USB HID keyboard: `USBHIDKeyboard`; `keyboard.write(keycode)` does
+      press+release.
+- [x] BLE central: scan → connect to the DQX-Q7 (`98:4a:c0:ce:bf:a2`).
+- [x] Bond/pairing: pair (`secureConnection()`); the bond key is persisted
+      in NVS by the NimBLE stack, so reconnects don't re-pair.
+- [x] Discover services/characteristics; **subscribe to every notify/indicate
+      characteristic** (the exact report characteristic UUID isn't pinned
+      down yet, so we listen broadly and filter by report shape instead).
+- [x] Report parser: read 2 bytes, non-zero byte 0 = a press carrying the
+      mask; `00 00` = release, ignored.
+- [x] Fixed button->key map + double-tap window as compile-time constants in
+      `include/config.h` (`kButtonMap`, `DOUBLE_TAP_WINDOW_MS`).
+- [x] Per-button state machine, generic over `kButtonMap`:
+      - `doubleKey == 0` → instant mode, fires on press.
+      - `doubleKey != 0` → window timer; 1 vs 2 taps.
+- [ ] Filter volume **auto-repeat** (the ~4Hz burst while held) if it turns
+      out to cause unwanted repeats in Zwift's menus — not yet an issue since
+      the direction buttons are instant single-key sends.
+- [ ] Pin down the exact report characteristic UUID from real logs, and
+      subscribe only to that one instead of every notify/indicate
+      characteristic.
 - [ ] End-to-end test on Zwift PC (navigate a menu).
 
-### Phase 2 — Web config (on-demand via GPIO)
-Goal: edit the JSON without recompiling, without sacrificing the radio
-during normal use.
-
-- [ ] Read a **GPIO (jumper/button)** at boot:
-      - inactive → normal mode, **Wi-Fi off** (radio 100% for BLE).
-      - active → bring up an **AP** with a web page to edit `/config.json`.
-- [ ] Web page: a form that reads/writes the JSON on LittleFS; save → reboot
-      into normal mode.
-- [ ] (Optional) validate the JSON on submit.
-
-> The JSON is the **contract** between the two phases. Phase 2 only writes
-> to that file; Phase 1's core doesn't change. Design Phase 1's loader ready
-> from the start to re-read the file.
-
 ### Future / optional
-- [ ] Expand actions via the free double-taps (edit the JSON).
 - [ ] Test multi-press (2 simultaneous bits) if more slots are needed.
-- [ ] Status indicator (LED): connected / disconnected / config mode.
+- [ ] Status indicator (LED): connected / disconnected.
 - [ ] Deep sleep + wake on BLE activity (if it ever goes battery-powered).
 
 ---
@@ -313,8 +282,8 @@ during normal use.
 - **Board:** ESP32-S3 N16R8. **Toolchain:** Arduino-ESP32 3.x + TinyUSB +
   NimBLE.
 - **Output:** USB HID keyboard → Zwift PC.
-- **Config:** `/config.json` on LittleFS. Phase 2: web via on-demand AP
-  (GPIO).
+- **Config:** fixed at compile time in `include/config.h` (`kButtonMap`,
+  `DOUBLE_TAP_WINDOW_MS`). No runtime or web config.
 - **Map:** ←→↑↓ for the 4 directions + Enter (single Play) / Esc (double
   Play).
 - **No HOLD.** Double-tap to expand. Companion stays in charge of in-game
@@ -327,8 +296,6 @@ during normal use.
 - `Adafruit TinyUSB Library` (or the TinyUSB bundled in the Arduino-ESP32
   3.x core)
 - `NimBLE-Arduino` (h2zero)
-- `ArduinoJson` (v7)
-- `LittleFS` (built into the ESP32 core)
 
 > Recommended to use **PlatformIO** in VS Code (dependency management and
 > S3 board support more predictable than the Arduino IDE). Board:
@@ -397,7 +364,7 @@ board_build.arduino.usb_mode = 1              ; 1 = TinyUSB (enables HID)
 board_build.arduino.usb_cdc_on_boot = 0       ; 0 = don't occupy native USB with CDC serial
                                               ; (log goes over UART/COM4, native USB stays free for HID)
 
-; --- Flash 16MB / PSRAM 8MB (N16R8) ---
+; --- Flash 16MB (N16R8) ---
 board_upload.flash_size = 16MB
 board_build.partitions = default_16MB.csv
 build_flags =
@@ -406,7 +373,6 @@ build_flags =
 
 lib_deps =
     h2zero/NimBLE-Arduino
-    bblanchon/ArduinoJson@^7
     ; TinyUSB: use the one built into the Arduino-ESP32 3.x core (via ARDUINO_USB_MODE)
     ; or adafruit/Adafruit TinyUSB Library if you choose that one instead
 ```

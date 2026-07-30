@@ -1,8 +1,8 @@
 // BLE Remote -> USB HID Bridge (Zwift Navigation Remote)
 //
-// Phase 1 (core, no Wi-Fi): the ESP32-S3 acts as a BLE central, reads the
-// DQX-Q7 remote's report, and re-emits it over the native USB port as a
-// TinyUSB HID keyboard.
+// The ESP32-S3 acts as a BLE central, reads the DQX-Q7 remote's report,
+// and re-emits it over the native USB port as a TinyUSB HID keyboard.
+// The button->key map is fixed at compile time in config.h.
 // See project.md for the button map, known risks, and roadmap.
 
 #include <Arduino.h>
@@ -19,43 +19,35 @@ static NimBLEClient *client = nullptr;
 static volatile bool deviceFound = false;
 static volatile bool connected = false;
 
-// TODO (Phase 1): load this map from /config.json (ArduinoJson) instead of
-// hardcoding it -- this mirrors the default map in project.md section 5.
-// Play/Pause is the only button with a double-tap action; the window is
-// paid only by it, so the four direction buttons stay instant.
-static bool playPausePending = false;
-static uint32_t playPausePendingSince = 0;
+struct ButtonState {
+  bool pending = false;
+  uint32_t pendingSince = 0;
+};
+static ButtonState buttonStates[kButtonMapCount];
 
 static void handleButtonPress(uint8_t mask) {
-  switch (mask) {
-    case ButtonMask::BACK:
-      keyboard.write(KEY_LEFT_ARROW);
-      break;
-    case ButtonMask::FORWARD:
-      keyboard.write(KEY_RIGHT_ARROW);
-      break;
-    case ButtonMask::VOL_UP:
-      keyboard.write(KEY_UP_ARROW);
-      break;
-    case ButtonMask::VOL_DOWN:
-      keyboard.write(KEY_DOWN_ARROW);
-      break;
-    case ButtonMask::PLAY_PAUSE: {
-      uint32_t now = millis();
-      if (playPausePending &&
-          (now - playPausePendingSince) <= DEFAULT_DOUBLE_TAP_WINDOW_MS) {
-        // Second tap inside the window -> double-tap action.
-        playPausePending = false;
-        keyboard.write(KEY_ESC);
-      } else {
-        // First tap -> wait out the window in loop() for a possible second.
-        playPausePending = true;
-        playPausePendingSince = now;
-      }
-      break;
+  for (size_t i = 0; i < kButtonMapCount; i++) {
+    const ButtonMapping &mapping = kButtonMap[i];
+    if (mapping.mask != mask) continue;
+
+    if (mapping.doubleKey == 0) {
+      // No double-tap configured for this button -> fire instantly.
+      keyboard.write(mapping.singleKey);
+      return;
     }
-    default:
-      break;
+
+    ButtonState &state = buttonStates[i];
+    uint32_t now = millis();
+    if (state.pending && (now - state.pendingSince) <= DOUBLE_TAP_WINDOW_MS) {
+      // Second tap inside the window -> double-tap action.
+      state.pending = false;
+      keyboard.write(mapping.doubleKey);
+    } else {
+      // First tap -> wait out the window in loop() for a possible second.
+      state.pending = true;
+      state.pendingSince = now;
+    }
+    return;
   }
 }
 
@@ -99,8 +91,8 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
 };
 
 // Subscribes to every notify/indicate characteristic on every service.
-// TODO (Phase 1): once the real report characteristic is known from the
-// logs above, subscribe only to that one instead of everything.
+// TODO: once the real report characteristic is known from the logs above,
+// subscribe only to that one instead of everything.
 static void subscribeToAll() {
   auto *services = client->getServices(true);
   for (auto *service : *services) {
@@ -155,20 +147,21 @@ void setup() {
   scan->setAdvertisedDeviceCallbacks(new ScanCallbacks());
   scan->setActiveScan(true);
   scan->start(0, false);
-
-  // TODO (Phase 1): LittleFS + /config.json parser (ArduinoJson), to
-  // replace the hardcoded map in handleButtonPress().
 }
 
 void loop() {
   if (deviceFound && !connected) {
     connectToRemote();
   }
-  if (playPausePending &&
-      (millis() - playPausePendingSince) > DEFAULT_DOUBLE_TAP_WINDOW_MS) {
-    // Window elapsed with no second tap -> single-tap action.
-    playPausePending = false;
-    keyboard.write(KEY_RETURN);
+
+  uint32_t now = millis();
+  for (size_t i = 0; i < kButtonMapCount; i++) {
+    ButtonState &state = buttonStates[i];
+    if (state.pending && (now - state.pendingSince) > DOUBLE_TAP_WINDOW_MS) {
+      // Window elapsed with no second tap -> single-tap action.
+      state.pending = false;
+      keyboard.write(kButtonMap[i].singleKey);
+    }
   }
   delay(10);
 }

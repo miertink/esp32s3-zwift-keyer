@@ -7,18 +7,21 @@ Esc).
 Full specification (hardware, BLE protocol, key map, roadmap, and known
 risks): see [project.md](project.md).
 
+The button->key map and double-tap timing are fixed at compile time in
+[include/config.h](include/config.h) — there is no runtime or web-based
+config.
+
 ## Environment
 
 - **Board:** ESP32-S3 DevKit N16R8
 - **Toolchain:** PlatformIO (`platform = espressif32`, `framework = arduino`)
-- **Libs:** NimBLE-Arduino, ArduinoJson v7, TinyUSB (built into the core)
+- **Libs:** NimBLE-Arduino, TinyUSB (built into the core)
 
 ## Build
 
 ```sh
 pio run                 # compile
 pio run -t upload       # flash over UART (COM4)
-pio run -t uploadfs     # flash /data/config.json to LittleFS
 pio device monitor      # serial log (COM4, 115200)
 ```
 
