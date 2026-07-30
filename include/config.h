@@ -33,8 +33,8 @@ struct ButtonMapping {
 constexpr uint32_t DOUBLE_TAP_WINDOW_MS = 300;
 
 constexpr ButtonMapping kButtonMap[] = {
-    {ButtonMask::BACK,       KEY_LEFT_ARROW,  0},
-    {ButtonMask::FORWARD,    KEY_RIGHT_ARROW, 0},
+    {ButtonMask::BACK,       KEY_LEFT_ARROW,  KEY_F9},
+    {ButtonMask::FORWARD,    KEY_RIGHT_ARROW, KEY_F3},
     {ButtonMask::VOL_UP,     KEY_UP_ARROW,    0},
     {ButtonMask::VOL_DOWN,   KEY_DOWN_ARROW,  0},
     {ButtonMask::PLAY_PAUSE, KEY_RETURN,      KEY_ESC},
