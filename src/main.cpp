@@ -1,8 +1,9 @@
 // BLE Remote -> USB HID Bridge (Zwift Navigation Remote)
 //
-// Fase 1 (nucleo, sem Wi-Fi): ESP32-S3 como BLE central le o report do
-// controle DQX-Q7 e reemite pelo USB nativo como teclado HID (TinyUSB).
-// Ver project.md para o mapa de botoes, riscos conhecidos e roadmap.
+// Phase 1 (core, no Wi-Fi): the ESP32-S3 acts as a BLE central, reads the
+// DQX-Q7 remote's report, and re-emits it over the native USB port as a
+// TinyUSB HID keyboard.
+// See project.md for the button map, known risks, and roadmap.
 
 #include <Arduino.h>
 #include <USB.h>
@@ -16,8 +17,8 @@ USBHIDKeyboard keyboard;
 static NimBLEAdvertisedDevice *remoteDevice = nullptr;
 static bool connected = false;
 
-// TODO (Fase 1): parser de report + maquina de estados single/double-tap
-// (ver project.md secao 3.3-3.5 e 5). Por ora so loga o report bruto.
+// TODO (Phase 1): report parser + single/double-tap state machine
+// (see project.md sections 3.3-3.5 and 5). For now just logs the raw report.
 static void onNotify(NimBLERemoteCharacteristic *characteristic,
                       uint8_t *data, size_t length, bool isNotify) {
   if (length < 1) return;
@@ -28,16 +29,16 @@ static void onNotify(NimBLERemoteCharacteristic *characteristic,
 class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
   void onResult(NimBLEAdvertisedDevice *device) override {
     if (device->getAddress().toString() == REMOTE_BLE_ADDRESS) {
-      Serial.println("[BLE] DQX-Q7 encontrado, parando scan...");
+      Serial.println("[BLE] DQX-Q7 found, stopping scan...");
       NimBLEDevice::getScan()->stop();
     }
   }
 };
 
 static void connectToRemote() {
-  // TODO (Fase 1): conectar, parear/bond (persistir no NVS), descobrir
-  // servico/characteristic de report e assinar notificacoes.
-  // Ver project.md secao 7.2 sobre acesso ao HID 0x1812 como central.
+  // TODO (Phase 1): connect, pair/bond (persist in NVS), discover the
+  // report service/characteristic, and subscribe to notifications.
+  // See project.md section 7.2 about accessing HID 0x1812 as a central.
 }
 
 void setup() {
@@ -55,14 +56,14 @@ void setup() {
   scan->setActiveScan(true);
   scan->start(0, false);
 
-  // TODO (Fase 1): LittleFS + parser de /config.json (ArduinoJson).
-  // TODO (Fase 1): mapa nome->keycode HID.
+  // TODO (Phase 1): LittleFS + /config.json parser (ArduinoJson).
+  // TODO (Phase 1): name->HID keycode map.
 }
 
 void loop() {
   if (!connected) {
-    // TODO (Fase 1): logica de (re)conexao agressiva apos sleep do controle
-    // (ver project.md secao 7.3).
+    // TODO (Phase 1): aggressive (re)connection logic after the remote
+    // sleeps (see project.md section 7.3).
   }
   delay(10);
 }
