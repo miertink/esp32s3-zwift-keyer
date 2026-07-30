@@ -170,6 +170,21 @@ Size:       2 bytes (bitmap)
 > the new stack (Arduino-ESP32 3.x) is used freely — it's where S3 + USB HID +
 > BLE central are best supported.
 
+### Status LED
+
+The board has a single onboard addressable RGB LED (`RGB_BUILTIN`, GPIO48)
+— not two separate LEDs — so it does double duty for both "is the firmware
+running" and "is the remote paired":
+
+| LED state | Meaning |
+|---|---|
+| Dark | Firmware isn't running (crashed, or board unplugged/unpowered) |
+| Short blue double-flash, repeating | Firmware is running, waiting for the remote to (re)connect |
+| Solid green | Remote is connected and paired |
+
+Blink timing (`LED_FLASH_ON_MS`, `LED_FLASH_GAP_MS`, `LED_CYCLE_PAUSE_MS`)
+lives in `include/config.h` alongside the button map.
+
 ---
 
 ## 5. Key map (fixed, compiled into firmware)
@@ -222,6 +237,10 @@ config.
 - [x] Per-button state machine, generic over `kButtonMap`:
       - `doubleKey == 0` → instant mode, fires on press.
       - `doubleKey != 0` → window timer; 1 vs 2 taps.
+- [x] Status LED: the board's single onboard addressable RGB LED
+      (`RGB_BUILTIN`, GPIO48) does double duty — short blue double-flash
+      while waiting for the remote to (re)connect, solid green once paired.
+      See section 4.
 - [ ] Filter volume **auto-repeat** (the ~4Hz burst while held) if it turns
       out to cause unwanted repeats in Zwift's menus — not yet an issue since
       the direction buttons are instant single-key sends.
@@ -232,7 +251,6 @@ config.
 
 ### Future / optional
 - [ ] Test multi-press (2 simultaneous bits) if more slots are needed.
-- [ ] Status indicator (LED): connected / disconnected.
 - [ ] Deep sleep + wake on BLE activity (if it ever goes battery-powered).
 
 ---
@@ -288,6 +306,8 @@ config.
   Play).
 - **No HOLD.** Double-tap to expand. Companion stays in charge of in-game
   actions.
+- **Status LED:** blue double-flash = waiting for the remote; solid green =
+  paired; dark = firmware not running.
 
 ---
 

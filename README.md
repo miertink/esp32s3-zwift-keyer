@@ -40,6 +40,20 @@ Keep both plugged in while you're setting this up. Once everything works,
 you technically only need the native USB port connected for daily use, but
 there's no harm in leaving both in.
 
+## The status LED
+
+The board has one onboard LED, and it tells you everything you need to
+know about its state at a glance:
+
+| What you see | What it means |
+|---|---|
+| **Off** (dark) | The firmware isn't running — check the USB cable, or that the upload actually succeeded |
+| **Blue, flashing twice then pausing** (blink-blink ... blink-blink ...) | Firmware is running and waiting to connect to the remote |
+| **Solid green** | Connected — the remote is paired and ready to use |
+
+This is the fastest way to check things are working without needing the
+serial monitor open at all.
+
 ## First-time setup (flashing the firmware)
 
 1. Open this project folder in VS Code (`File > Open Folder...`). The
@@ -74,8 +88,9 @@ and the remote, and it's automatic:
    button is pressed — so this step wakes it up and makes it visible to
    the board.
 3. Within a couple of seconds, the board finds it (by its fixed Bluetooth
-   address) and connects and pairs with it automatically. If you have the
-   serial monitor open, you'll see:
+   address) and connects and pairs with it automatically. Watch the
+   onboard LED turn from blinking blue to solid green — or, if you have
+   the serial monitor open, you'll see:
    ```
    [BLE] DQX-Q7 found, stopping scan...
    [BLE] connected, securing link...
@@ -101,7 +116,7 @@ this table:
 
 ```cpp
 constexpr ButtonMapping kButtonMap[] = {
-    {ButtonMask::BACK,       KEY_LEFT_ARROW,  KEY_F9},
+    {ButtonMask::BACK,       KEY_LEFT_ARROW,  KEY_F10},
     {ButtonMask::FORWARD,    KEY_RIGHT_ARROW, KEY_F3},
     {ButtonMask::VOL_UP,     KEY_UP_ARROW,    0},
     {ButtonMask::VOL_DOWN,   KEY_DOWN_ARROW,  0},
@@ -184,8 +199,11 @@ until you update this line with its own address. To find it:
   serial monitor window that's already open (VS Code's included, or a
   separate PlatformIO monitor tab) — only one program can use the port at
   a time.
-- **Remote won't connect**: press a button on it to wake it up; check the
-  serial monitor log for `[BLE] ...` lines to see how far it gets.
+- **Remote won't connect (LED keeps blinking blue and never turns solid)**:
+  press a button on it to wake it up; check the serial monitor log for
+  `[BLE] ...` lines to see how far it gets.
+- **LED is dark**: the firmware isn't running — check the cable and that
+  the upload actually succeeded.
 - **Board acts strange after many firmware updates**: a full
   `pio run -t erase` followed by a fresh upload wipes everything, including
   the saved remote pairing — you'll need to redo the "first-time pairing"

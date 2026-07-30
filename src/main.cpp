@@ -51,6 +51,28 @@ static void handleButtonPress(uint8_t mask) {
   }
 }
 
+// Solid green once the remote is paired; otherwise a short double-flash in
+// blue while waiting for it (see the note on the single onboard LED in
+// config.h). A fully dark LED means the firmware itself isn't running.
+static void updateStatusLed() {
+  if (connected) {
+    neopixelWrite(RGB_BUILTIN, 0, RGB_BRIGHTNESS, 0);
+    return;
+  }
+
+  constexpr uint32_t kPeriodMs =
+      LED_FLASH_ON_MS * 2 + LED_FLASH_GAP_MS + LED_CYCLE_PAUSE_MS;
+  uint32_t t = millis() % kPeriodMs;
+  bool flashOn = (t < LED_FLASH_ON_MS) ||
+                 (t >= LED_FLASH_ON_MS + LED_FLASH_GAP_MS &&
+                  t < LED_FLASH_ON_MS * 2 + LED_FLASH_GAP_MS);
+  if (flashOn) {
+    neopixelWrite(RGB_BUILTIN, 0, 0, RGB_BRIGHTNESS);
+  } else {
+    neopixelWrite(RGB_BUILTIN, 0, 0, 0);
+  }
+}
+
 // The DQX-Q7 report is a Consumer usage, 2 bytes, bitmap in byte 0: a tap
 // arrives as "<mask> 00" immediately followed by a "00 00" release (see
 // project.md 3.3-3.4), so only the non-zero byte-0 frame is a button press.
@@ -163,5 +185,7 @@ void loop() {
       keyboard.write(kButtonMap[i].singleKey);
     }
   }
+
+  updateStatusLed();
   delay(10);
 }
