@@ -28,7 +28,7 @@ practical "how do I actually use this" guide.
   panel). PlatformIO handles downloading the right compiler and libraries
   for you — you don't need to install anything else by hand.
 
-![Photo of the DQX-Q7 Bluetooth remote](docs/remotectrl.png)
+![Real setup: the DQX-Q7 remote strapped to the drop bars next to a phone mount, with Zwift running on the TV in the background](docs/mysetup.jpeg)
 
 ## The two USB ports
 
