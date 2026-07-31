@@ -36,12 +36,19 @@ The board has two USB-C ports and they do different jobs:
 | **UART** (labeled on the board, this machine's COM4) | Flashing the firmware and reading the debug log |
 | **Native USB** | The one that becomes the "keyboard" your PC sees |
 
-![Schematic diagram showing the ESP32-S3 DevKit's two USB-C ports: UART for flashing/logging, Native USB for the HID keyboard](docs/board-ports.svg)
+![Photo of the ESP32-S3 DevKit board with labeled parts, including the two micro-USB ports: "ESP32-S3 USB Port" (native USB) at the top and "USB-to-UART Port" at the bottom, next to the Reset and Boot buttons](docs/esp32-s3.jpg)
 
-*Illustrative diagram, not a photo of the actual board — exact port position
-varies by vendor, so confirm against your own board's silkscreen labels if
-unsure (see project.md section 10 for how to tell them apart by their
-Device Manager signature too).*
+In this photo, the board's own labels map onto the table above like this:
+
+- **"USB-to-UART Port"** (bottom connector, next to the **USB-to-UART Bridge**
+  chip and the **Reset**/**Boot** buttons) is the **UART** port — flash and
+  monitor here.
+- **"ESP32-S3 USB Port"** (top connector) is the **Native USB** port — this
+  is the one that shows up as a keyboard once the firmware is running.
+
+Port labeling and position vary by vendor, so if your board looks different,
+confirm against its own silkscreen (see project.md section 10 for how to
+tell them apart by their Device Manager signature too).
 
 Keep both plugged in while you're setting this up. Once everything works,
 you technically only need the native USB port connected for daily use, but
