@@ -21,11 +21,14 @@ practical "how do I actually use this" guide.
   your PC (see "The two USB ports" below — you need both while setting up).
 - Any **DQX-Q7 remote** — no need to know its Bluetooth address ahead of
   time; the firmware finds and remembers it on its own (see "Connecting the
-  remote" below).
+  remote" below). Available on
+  [AliExpress](https://pt.aliexpress.com/item/1005012057611333.html).
 - [VS Code](https://code.visualstudio.com/) with the **PlatformIO IDE**
   extension installed (search for "PlatformIO IDE" in the Extensions
   panel). PlatformIO handles downloading the right compiler and libraries
   for you — you don't need to install anything else by hand.
+
+![Photo of the DQX-Q7 Bluetooth remote](docs/remotectrl.png)
 
 ## The two USB ports
 
