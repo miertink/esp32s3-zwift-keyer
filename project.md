@@ -67,7 +67,10 @@ Parts ruled out, and why:
 - SoC manufacturer: **Zhuhai Jieli (JieLi)** — a common Chinese BT chip.
 - Sold as a "Bluetooth Media Button Remote" for motorcycles/bikes (reseller
   brands: Jaesien, etc.). Works on iOS/Android with no app.
-- **BT Address:** `98:4a:c0:ce:bf:a2`
+- **BT Address of the unit used for development:** `98:4a:c0:ce:bf:a2` —
+  not hardcoded in the firmware; see section 4's "pairing by signature"
+  note for how any DQX-Q7 unit is found and remembered without needing to
+  know its address ahead of time.
 - Original power source: **CR2** battery (non-rechargeable 3V lithium).
 
 ---
@@ -82,6 +85,22 @@ Parts ruled out, and why:
   well.
 - `ManufacturerName = zhuhai_jieli`, `ModelNumber = hid_mouse` (default
   firmware string — **ignore it**, it doesn't reflect actual behavior).
+- **The advertisement packet itself carries none of the above** — no
+  device name, no advertised service UUIDs, no manufacturer data
+  (confirmed empirically from the ESP32 side with NimBLE's
+  `NimBLEAdvertisedDevice::haveName()/haveServiceUUID()/haveManufacturerData()`,
+  all false). Everything above (PnP ID, manufacturer/model strings,
+  Appearance) only comes from GATT characteristics read *after*
+  connecting, or from how other tools (Windows, WebHID) surface it — not
+  from the raw advertisement a central sees while scanning. This is why
+  the firmware can't filter candidates by name/UUID before connecting;
+  see section 4.
+- **Weak, chatty signal.** Even held right next to the ESP32-S3's antenna,
+  the remote's RSSI only reaches about **-76 to -85 dBm** (a phone or
+  smartwatch nearby is typically -50 to -65 dBm) — consistent with a
+  coin-cell-powered chip using low BLE TX power. Its `connectable` flag
+  also flickers between advertisement packets (sometimes 0, sometimes 1
+  for the same device from one scan result to the next).
 
 ### 3.2 GATT services (6 services)
 - `0x1800` Generic Access
@@ -91,12 +110,20 @@ Parts ruled out, and why:
 - `0xAE40` (proprietary JieLi): char `0xAE41` (write), `0xAE42` (notify/CCCD)
 - `0xAE00` (proprietary JieLi): char `0xAE01` (write), `0xAE02` (notify/CCCD)
 
-> **There is NO HID `0x1812` service visible via generic GATT on iOS.**
-> iOS hides HID from third-party apps. But the HID **does exist** and works:
-> on Windows the remote operates as a native keyboard/consumer HID (volume,
-> play, track skip work with no companion app). The proprietary `0xAExx`
-> services, when subscribed (AE42/AE02), **emitted nothing** on button
-> presses — the buttons come out over **standard HID**, not the AExx ones.
+> **Confirmed: the standard HID service (`0x1812`) is real and reachable as
+> a central**, even though it's invisible via generic GATT browsing on
+> iOS (iOS hides third-party access to HID; that's a host-side policy, not
+> a property of the remote). Connecting from the ESP32-S3 and enumerating
+> services turns up `0x1812` with several `0x2A4D` ("Report") characteristics
+> — one of them is exactly the 2-byte Consumer report described in 3.3,
+> confirmed by the button-press bytes flowing through it live. The two
+> proprietary `0xAExx` services, even when subscribed (`AE42`/`AE02`),
+> **emitted nothing** on button presses — only `0x1812` carries the report.
+> The firmware subscribes to every notify/indicate characteristic under
+> `0x1812` rather than picking out the one exact Report instance (there
+> are several, presumably one per HID report type this chip supports;
+> distinguishing them would mean reading each one's Report Reference
+> descriptor, which isn't worth the extra complexity here).
 
 ### 3.3 Button HID report (the central data) — captured via WebHID
 Tool used: **USB Device Viewer online (WebHID)**
@@ -174,12 +201,44 @@ Size:       2 bytes (bitmap)
   plugged in. Wired USB output = 100% supported by Zwift on PC (avoids BLE
   keyboard host limitations).
 
+### Pairing by signature, not by hardcoded address
+
+The firmware doesn't hardcode any specific remote's Bluetooth address, so
+any DQX-Q7 unit works without editing `config.h` — useful for other users
+building this, or for swapping in a replacement unit. Since the
+advertisement carries no identifying name/UUID/manufacturer data (section
+3.1), there's nothing to filter on before connecting. Instead:
+
+1. **First boot (no address saved in NVS yet):** the scan accepts any
+   nearby, connectable, reasonably-strong-signal advertisement as a
+   candidate (see `LEARNING_MIN_RSSI_DBM`/`LEARNING_CONNECT_TIMEOUT_S` in
+   `config.h` — tuned against this remote's own weak RSSI, see 3.1).
+2. For each candidate: connect, then check whether it exposes the exact
+   combination of GATT services that fingerprints this remote's chipset
+   (standard HID `0x1812` **and** both proprietary JieLi services `0xAE40`
+   + `0xAE00` — see `RemoteSignature` in `config.h`). If it doesn't match,
+   disconnect immediately and move to the next candidate. Bonding
+   (`secureConnection()`) is deliberately requested only *after* a match,
+   so rejected candidates never see a pairing prompt on their own side.
+3. On a match: the address is saved to NVS (`Preferences`, namespace
+   `zwiftkeyer`) and used directly on every subsequent boot — no more
+   hunting through nearby devices. Sending `forget` over the serial
+   monitor clears the saved address to re-learn a (possibly different)
+   remote.
+
+In a Bluetooth-quiet room this resolves in a few seconds. In a crowded
+one, it can take a bit of patience/retries — see project.md section 7 for
+why, and the README's "Connecting the remote" section for the practical
+walkthrough.
+
 ### Toolchain (confirmed)
 - **Arduino-ESP32 (core 3.x)**
 - **TinyUSB** (USB HID keyboard side)
 - **NimBLE-Arduino** (BLE central side) — lightweight, coexists well with
   TinyUSB
-- Storage: **NVS** (BLE bond keys) only — no filesystem, no runtime config.
+- Storage: **NVS**, via both the NimBLE stack directly (BLE bond keys) and
+  the Arduino `Preferences` library (the learned remote's address). No
+  filesystem, no user-facing runtime config.
 
 > Note: no ESP-IDF 4.4 constraint like the one in the ZX-Wespi project. Here
 > the new stack (Arduino-ESP32 3.x) is used freely — it's where S3 + USB HID +
@@ -256,12 +315,16 @@ config.
       (`RGB_BUILTIN`, GPIO48) does double duty — short blue double-flash
       while waiting for the remote to (re)connect, solid green once paired.
       See section 4.
+- [x] Pin down the exact report characteristic from real logs: it's
+      `0x2A4D` ("Report") under the standard HID service `0x1812` (see
+      section 3.2). Subscription is now narrowed to that service instead
+      of every notify/indicate characteristic on every service.
+- [x] Pair by GATT service signature instead of a hardcoded address, with
+      the learned address persisted to NVS — see section 4's "Pairing by
+      signature" note. Any DQX-Q7 unit works without editing `config.h`.
 - [ ] Filter volume **auto-repeat** (the ~4Hz burst while held) if it turns
       out to cause unwanted repeats in Zwift's menus — not yet an issue since
       the direction buttons are instant single-key sends.
-- [ ] Pin down the exact report characteristic UUID from real logs, and
-      subscribe only to that one instead of every notify/indicate
-      characteristic.
 - [ ] End-to-end test on Zwift PC (navigate a menu).
 
 ### Future / optional
@@ -278,13 +341,10 @@ config.
    Mapped territory, but not a "works on the first blink" kind of thing.
    Isolate the bring-up.
 
-2. **Accessing HID as a central.**
-   On iOS the HID `0x1812` is hidden, but that's iOS policy — as a
-   **central**, the S3 should be able to talk to the remote's standard HID
-   (the one Windows sees). If `0x1812` doesn't show up in discovery,
-   alternatives: boot protocol host, or check whether the Consumer report
-   (the same one WebHID saw) comes through an accessible characteristic.
-   **Validate this early.**
+2. **Accessing HID as a central. RESOLVED.**
+   On iOS the HID `0x1812` is hidden, but that was iOS policy, not a
+   property of the remote — confirmed the ESP32-S3 as a **central** can
+   discover and subscribe to `0x1812` directly (section 3.2).
 
 3. **Reconnection after the remote sleeps (UX risk).**
    The DQX-Q7 sleeps to save battery and only starts advertising again once a
@@ -305,16 +365,41 @@ config.
    with `double` only fires after the window. That's why the direction
    buttons are instant (no double) and only Play/Pause pays the latency.
 
+7. **Learning-mode candidate flood in a BLE-crowded room.** Since the
+   remote can't be filtered before connecting (section 3.1), first-time
+   pairing tries other nearby devices too. Real testing turned up two
+   compounding problems, both fixed:
+   - **A single unresponsive candidate could block the whole loop for
+     NimBLE's 30s default connect timeout**, including freezing the status
+     LED animation (not a crash — `updateStatusLed()` just never got
+     called during the block). Fixed with `LEARNING_CONNECT_TIMEOUT_S = 1`
+     (the API's minimum granularity).
+   - **Reusing one `NimBLEClient` across different candidate addresses
+     led to a wedged connection attempt** in testing (NimBLE clients are
+     meant for reconnecting to the *same* peer). Fixed by deleting and
+     recreating the client fresh for every candidate.
+   - Even with both fixes, expect first-time pairing to need a retry or
+     two in a busy environment — the remote's own weak RSSI (3.1) means
+     it doesn't reliably win the "first candidate found" race against
+     stronger, more chatty nearby devices like phones. Not something to
+     over-engineer further; it only has to succeed once per remote.
+
 ---
 
 ## 8. Quick reference (cheat sheet)
 
-- **Remote:** DQX-Q7, BLE, `98:4a:c0:ce:bf:a2`, JieLi, spoofs an Apple VID.
-- **Report:** Consumer (0x0C), Report ID 1, 2 bytes, bitmap.
+- **Remote:** DQX-Q7, BLE, JieLi, spoofs an Apple VID. Dev unit was
+  `98:4a:c0:ce:bf:a2`, but that's not hardcoded — see "pairing" below.
+- **Report:** Consumer (0x0C), Report ID 1, 2 bytes, bitmap, carried on
+  characteristic `0x2A4D` under standard HID service `0x1812`.
   `Vol+=0x01 Vol-=0x02 →=0x04 ←=0x08 Play=0x10`, release=`00 00`.
 - **Board:** ESP32-S3 N16R8. **Toolchain:** Arduino-ESP32 3.x + TinyUSB +
   NimBLE.
 - **Output:** USB HID keyboard → Zwift PC.
+- **Pairing:** no hardcoded address — connects to nearby candidates and
+  keeps whichever one matches the GATT service signature (`0x1812` +
+  `0xAE40` + `0xAE00`), then saves it to NVS. Send `forget` over serial to
+  re-learn a different unit. See section 4.
 - **Config:** fixed at compile time in `include/config.h` (`kButtonMap`,
   `DOUBLE_TAP_WINDOW_MS`). No runtime or web config.
 - **Map:** ←→↑↓ for the 4 directions + Enter (single Play) / Esc (double
@@ -331,6 +416,8 @@ config.
 - `Adafruit TinyUSB Library` (or the TinyUSB bundled in the Arduino-ESP32
   3.x core)
 - `NimBLE-Arduino` (h2zero)
+- `Preferences` (built into the Arduino-ESP32 core — NVS-backed key/value
+  storage, used to remember the learned remote's address)
 
 > Recommended to use **PlatformIO** in VS Code (dependency management and
 > S3 board support more predictable than the Arduino IDE). Board:

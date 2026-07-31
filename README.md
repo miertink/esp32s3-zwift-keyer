@@ -19,9 +19,9 @@ practical "how do I actually use this" guide.
 
 - The ESP32-S3 board (DevKit N16R8), with **two USB-C cables** plugged into
   your PC (see "The two USB ports" below — you need both while setting up).
-- The DQX-Q7 remote (the one with BT address `98:4a:c0:ce:bf:a2` in
-  `include/config.h` — see "Using a different/replacement remote" if yours
-  is a different unit).
+- Any **DQX-Q7 remote** — no need to know its Bluetooth address ahead of
+  time; the firmware finds and remembers it on its own (see "Connecting the
+  remote" below).
 - [VS Code](https://code.visualstudio.com/) with the **PlatformIO IDE**
   extension installed (search for "PlatformIO IDE" in the Extensions
   panel). PlatformIO handles downloading the right compiler and libraries
@@ -78,36 +78,51 @@ pio device monitor      # serial log (COM4, 115200)
 ## Connecting the remote (first-time pairing)
 
 You don't need to do anything on the PC — no Bluetooth settings, no
-pairing dialog. All the Bluetooth pairing happens between the ESP32 board
-and the remote, and it's automatic:
+pairing dialog, and no need to know the remote's Bluetooth address. All
+the Bluetooth pairing happens between the ESP32 board and the remote,
+automatically:
 
 1. Make sure the firmware is flashed and the board's native USB is plugged
    into your PC (it powers the board).
-2. **Press any button on the DQX-Q7 remote.** These remotes go to sleep to
-   save battery, and only start advertising over Bluetooth again once a
-   button is pressed — so this step wakes it up and makes it visible to
-   the board.
-3. Within a couple of seconds, the board finds it (by its fixed Bluetooth
-   address) and connects and pairs with it automatically. Watch the
-   onboard LED turn from blinking blue to solid green — or, if you have
-   the serial monitor open, you'll see:
+2. **Hold the remote close to the board** (within arm's reach) **and press
+   a button on it.** These remotes go to sleep to save battery, and only
+   start advertising over Bluetooth again once a button is pressed.
+3. The board doesn't know your specific remote's address yet on first
+   boot, so it briefly tries connecting to whatever nearby Bluetooth
+   devices it sees, checking each one to find the DQX-Q7 among them. In a
+   quiet environment this takes a few seconds; in a house full of phones,
+   earbuds, and smart devices, it can take a bit of patience — **keep
+   tapping a button on the remote every second or two** so it keeps
+   advertising while the board works through the candidates. If you have
+   the serial monitor open, you'll see it trying (and rejecting) other
+   devices before it lands on the right one:
    ```
-   [BLE] DQX-Q7 found, stopping scan...
-   [BLE] connected, securing link...
+   [BLE] candidate <some other device>, connecting to verify...
+   [BLE] connecting...
+   [BLE] not a match, disconnecting and resuming scan
+   [BLE] candidate 98:4a:c0:ce:bf:a2, connecting to verify...
+   [BLE] connecting...
+   [BLE] remote matched, saving 98:4a:c0:ce:bf:a2 to NVS
+   [BLE] securing link...
    [BLE] ready
    ```
-4. That's it — press a button and the mapped key should show up wherever
+4. Watch the onboard LED turn from blinking blue to solid green once it's
+   found and connected.
+5. That's it — press a button and the mapped key should show up wherever
    your cursor/focus is on the PC (try it in a text editor first, then in
    Zwift).
 
-**You only need to do this once.** The board remembers the remote (the
-pairing is saved in its internal flash) across power cycles and firmware
-updates — you won't need to re-pair unless you erase the board's flash
-entirely (`pio run -t erase`), or replace the remote with a different unit.
+**You only need to do this once.** Once found, the remote's address is
+saved to the board's flash (NVS) — every boot after that reconnects to it
+directly, no more hunting through nearby devices, and no re-pairing needed
+across power cycles or firmware updates.
 
-If the remote doesn't connect: press a button on it again (it may have
-gone back to sleep), and check that `include/config.h` has the right
-Bluetooth address for your unit (see below).
+If it's taking a long time: reset the board and try again — which
+specific "wrong" device wins the race to be tried first is random, so a
+retry alone often helps. If it never finds it at all, double-check the
+remote actually has a fresh battery and is within a meter or so (see
+"Using a different/replacement remote" below for why signal strength
+matters here).
 
 ## Customizing which key each button sends
 
@@ -173,25 +188,27 @@ re-pair the remote after reflashing.
 
 ## Using a different/replacement remote
 
-`include/config.h` has the exact Bluetooth address of one specific DQX-Q7
-unit hardcoded:
+Since the board doesn't hardcode any specific unit's address, switching to
+a different physical remote (a spare, a replacement after this one
+breaks, a friend's unit, etc.) needs no config changes at all — just tell
+the board to forget the one it currently remembers:
 
-```cpp
-#define REMOTE_BLE_ADDRESS "98:4a:c0:ce:bf:a2"
-```
+1. Open the serial monitor (`pio device monitor`, or the plug icon in VS
+   Code).
+2. Type `forget` and press Enter.
+3. The board clears its saved address and goes back into the same
+   "hunting for nearby candidates" mode described above — repeat the
+   first-time pairing steps with the new remote.
 
-The board only ever looks for that one address, so a different physical
-remote (a spare, a replacement after this one breaks, etc.) won't connect
-until you update this line with its own address. To find it:
-
-1. Install a BLE scanner app on your phone (e.g. **nRF Connect for
-   Mobile**, free on iOS/Android).
-2. Press a button on the new remote to wake it up, then scan for nearby
-   Bluetooth devices in the app.
-3. Look for a device advertising as a keyboard/HID device (it may show an
-   Apple-looking name/vendor, since these remotes spoof an Apple identity
-   — see project.md section 3.1) and note its address.
-4. Put that address into `REMOTE_BLE_ADDRESS`, save, and re-flash.
+**Why signal strength matters during pairing:** the DQX-Q7's Bluetooth
+chip has no name, no advertised services, and no manufacturer data in its
+advertisement — there's nothing to filter on except by actually connecting
+to a candidate and checking what it is. To avoid that turning into slowly
+trying every Bluetooth device in the neighborhood, the board only attempts
+candidates with a reasonably strong signal, which is also why it's worth
+holding the remote close while pairing: it's a coin-cell-powered chip with
+low transmit power to begin with, so "close" here means noticeably closer
+than you'd expect for typical Bluetooth accessories.
 
 ## Troubleshooting
 
@@ -202,8 +219,18 @@ until you update this line with its own address. To find it:
 - **Remote won't connect (LED keeps blinking blue and never turns solid)**:
   press a button on it to wake it up; check the serial monitor log for
   `[BLE] ...` lines to see how far it gets.
+- **First-time pairing is slow / seems stuck on "connecting..."**: normal
+  in a Bluetooth-crowded room — it's trying other nearby devices one at a
+  time before reaching the remote. Keep tapping the remote's button, hold
+  it close to the board, and/or just reset and try again (see "Connecting
+  the remote" above). The LED can look like it stopped blinking during
+  this phase too — that's expected, each connection attempt briefly blocks
+  the LED animation, not a crash.
 - **LED is dark**: the firmware isn't running — check the cable and that
   the upload actually succeeded.
+- **Want to pair a different remote**: type `forget` in the serial
+  monitor (see "Using a different/replacement remote" above) rather than
+  erasing the whole board.
 - **Board acts strange after many firmware updates**: a full
   `pio run -t erase` followed by a fresh upload wipes everything, including
   the saved remote pairing — you'll need to redo the "first-time pairing"

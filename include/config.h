@@ -9,8 +9,35 @@
 #include <cstdint>
 #include <USBHIDKeyboard.h>
 
-// --- DQX-Q7 remote ---------------------------------------------------
-#define REMOTE_BLE_ADDRESS "98:4a:c0:ce:bf:a2"
+// --- DQX-Q7 remote signature ---------------------------------------------
+// The remote's BLE advertisement carries no name, no advertised service
+// UUIDs, and no manufacturer data (confirmed empirically), so there is
+// nothing to filter on before connecting. Instead, the firmware connects
+// to whatever nearby device is advertising and checks, after connecting,
+// whether it exposes this exact combination of GATT services -- specific
+// to this remote's chipset. First match is saved to NVS so only the first
+// boot ever needs to "learn" a remote; see main.cpp.
+namespace RemoteSignature {
+constexpr uint16_t HID_SERVICE     = 0x1812;  // standard HID-over-GATT
+constexpr uint16_t JIELI_SERVICE_1 = 0xAE40;  // proprietary (write/notify)
+constexpr uint16_t JIELI_SERVICE_2 = 0xAE00;  // proprietary (write/notify)
+}  // namespace RemoteSignature
+
+// Learning mode connects to nearby candidates one at a time to check their
+// service signature. Two guards keep that from being slow/disruptive in a
+// BLE-crowded room: only try candidates with a reasonably strong signal,
+// and give up quickly on any single candidate that doesn't respond, instead
+// of blocking for NimBLE's 30s default.
+//
+// The remote itself only reaches about -76dBm even held right next to the
+// board (it's coin-cell powered, low BLE TX power by design) -- confirmed
+// via the [BLE][RAW] diagnostic log in ScanCallbacks::onResult. -60 excluded
+// it entirely; -80 leaves enough margin to include it while still excluding
+// clearly-distant devices (the ones seen around -90 to -99dBm).
+constexpr int8_t LEARNING_MIN_RSSI_DBM = -80;
+// 1s is the minimum this API supports (it only takes whole seconds) -- as
+// fast as possible, so a bad candidate wastes as little time as possible.
+constexpr uint8_t LEARNING_CONNECT_TIMEOUT_S = 1;
 
 // HID report: Consumer (0x0C), Report ID 1, 2 bytes, bitmap in byte 0.
 namespace ButtonMask {
