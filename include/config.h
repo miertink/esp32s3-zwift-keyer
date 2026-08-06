@@ -59,6 +59,14 @@ struct ButtonMapping {
 
 constexpr uint32_t DOUBLE_TAP_WINDOW_MS = 300;
 
+// keyboard.write() presses and releases a key back-to-back with no gap at
+// all, which some games miss: their input polling can run at a coarser
+// interval than the press, so a same-frame down+up occasionally never gets
+// sampled while it's "down". Holding the key for a short, human-scale
+// duration before releasing it fixes that at the cost of a small, one-time
+// blocking delay per keypress in loop().
+constexpr uint32_t KEY_HOLD_MS = 50;
+
 constexpr ButtonMapping kButtonMap[] = {
     {ButtonMask::BACK,       KEY_LEFT_ARROW,  KEY_F10},
     {ButtonMask::FORWARD,    KEY_RIGHT_ARROW, KEY_F3},

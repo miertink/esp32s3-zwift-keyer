@@ -39,26 +39,41 @@ static std::vector<NimBLEAddress> rejectedAddresses;
 struct ButtonState {
   bool pending = false;
   uint32_t pendingSince = 0;
+  volatile uint8_t queuedKey = 0;  // key for loop() to send next, 0 = none
 };
 static ButtonState buttonStates[kButtonMapCount];
 
+// keyboard.write() presses and releases with no gap at all; hold the key
+// down for KEY_HOLD_MS instead so games polling input once per frame don't
+// miss a same-frame down+up (confirmed on Rouvy -- see config.h).
+static void sendKeyPress(uint8_t key) {
+  keyboard.press(key);
+  delay(KEY_HOLD_MS);
+  keyboard.release(key);
+}
+
+// Called from onNotify(), which runs on the NimBLE host task, not the main
+// loop -- so this only ever touches plain state here, never the USB HID
+// keyboard directly. The actual key send (with its blocking hold delay)
+// happens in loop() instead, for both the instant and the double-tap paths.
 static void handleButtonPress(uint8_t mask) {
   for (size_t i = 0; i < kButtonMapCount; i++) {
     const ButtonMapping &mapping = kButtonMap[i];
     if (mapping.mask != mask) continue;
 
     if (mapping.doubleKey == 0) {
-      // No double-tap configured for this button -> fire instantly.
-      keyboard.write(mapping.singleKey);
+      // No double-tap configured for this button -> queue it for loop() to
+      // send instantly on its next iteration.
+      buttonStates[i].queuedKey = mapping.singleKey;
       return;
     }
 
     ButtonState &state = buttonStates[i];
     uint32_t now = millis();
     if (state.pending && (now - state.pendingSince) <= DOUBLE_TAP_WINDOW_MS) {
-      // Second tap inside the window -> double-tap action.
+      // Second tap inside the window -> queue the double-tap key.
       state.pending = false;
-      keyboard.write(mapping.doubleKey);
+      state.queuedKey = mapping.doubleKey;
     } else {
       // First tap -> wait out the window in loop() for a possible second.
       state.pending = true;
@@ -292,10 +307,15 @@ void loop() {
   uint32_t now = millis();
   for (size_t i = 0; i < kButtonMapCount; i++) {
     ButtonState &state = buttonStates[i];
+    if (state.queuedKey != 0) {
+      uint8_t key = state.queuedKey;
+      state.queuedKey = 0;
+      sendKeyPress(key);
+    }
     if (state.pending && (now - state.pendingSince) > DOUBLE_TAP_WINDOW_MS) {
       // Window elapsed with no second tap -> single-tap action.
       state.pending = false;
-      keyboard.write(kButtonMap[i].singleKey);
+      sendKeyPress(kButtonMap[i].singleKey);
     }
   }
 
